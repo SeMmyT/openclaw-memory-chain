@@ -50,6 +50,8 @@ export type {
   MetricEvent,
   MetricsCollector,
   ContentOptions,
+  BaseAnchorConfig as BaseAnchorConfigType,
+  AnchorProviderType as AnchorProviderTypeEnum,
 } from './types.js';
 
 export { DEFAULT_SCORING_WEIGHTS } from './types.js';
@@ -63,6 +65,7 @@ export {
   verifyChain,
   getChainStats,
   loadConfig,
+  loadPrivateKey,
   setPasswordProvider,
 } from './chain/index.js';
 
@@ -186,3 +189,40 @@ export type {
   AnchorOptions,
   VerificationWithAnchorsResult,
 } from './anchor/types.js';
+
+// Base Blockchain Anchoring
+export {
+  anchorToBase,
+  verifyAgainstBase,
+  getBaseAnchorHistory,
+  getWitnessBalance,
+  getAnchorFee,
+  BaseAnchorProvider,
+} from './anchor/base.js';
+
+export type {
+  BaseAnchorConfig,
+  BaseAnchorReceipt,
+  OnChainAnchor,
+  BaseVerificationResult,
+} from './anchor/base.js';
+
+// Provider Abstraction
+export {
+  registerProvider,
+  getProvider,
+  getAllProviders,
+  hasProvider,
+} from './anchor/provider.js';
+
+export type {
+  AnchorProviderType,
+  AnchorProviderStatus,
+  ProviderSubmitResult,
+  ProviderVerifyResult,
+  ProviderAnchorRecord,
+  ProviderCostEstimate,
+  ProviderSubmitOptions,
+  ProviderVerifyOptions,
+  AnchorProvider,
+} from './anchor/provider.js';
