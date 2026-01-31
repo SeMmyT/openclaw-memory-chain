@@ -137,8 +137,8 @@ npm install witness-memory-chain
 Or clone and build:
 
 ```bash
-git clone https://github.com/SeMmyT/openclaw-memory-chain.git
-cd openclaw-memory-chain
+git clone https://github.com/SeMmyT/witness-memory-chain.git
+cd witness-memory-chain
 npm install
 npm run build
 ```

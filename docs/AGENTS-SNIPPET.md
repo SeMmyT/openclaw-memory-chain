@@ -82,4 +82,4 @@ memory-chain add "I am Klow. I help Daniel with software and life. I value hones
 
 ---
 
-> For full documentation, see the [Memory Chain README](https://github.com/SeMmyT/openclaw-memory-chain).
+> For full documentation, see the [Memory Chain README](https://github.com/SeMmyT/witness-memory-chain).
