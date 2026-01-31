@@ -28,7 +28,13 @@ import {
   getAnchorStatus,
   getUnanchoredEntries,
 } from './anchor/opentimestamps.js';
-import type { EntryType, Tier, ChainEntryInput } from './types.js';
+import {
+  anchorToBase,
+  verifyAgainstBase,
+  getWitnessBalance,
+  getAnchorFee,
+} from './anchor/base.js';
+import type { EntryType, Tier, ChainEntryInput, BaseAnchorConfig, AnchorProviderType } from './types.js';
 
 // Default data directory
 const DEFAULT_DATA_DIR = join(homedir(), '.openclaw', 'memory-chain');
@@ -495,11 +501,18 @@ program
 
 program
   .command('anchor [seq]')
-  .description('Submit entry for Bitcoin timestamping via OpenTimestamps')
-  .option('--batch', 'Anchor all unanchored entries', false)
+  .description('Submit entry for timestamping (OpenTimestamps or Base)')
+  .option('--batch', 'Anchor all unanchored entries (OTS only)', false)
+  .option('--provider <provider>', 'Anchor provider: opentimestamps or base', 'opentimestamps')
+  .option('--wallet-key <key>', 'Wallet private key for Base anchoring (or use WITNESS_WALLET_KEY env)')
+  .option('--registry <address>', 'WitnessRegistry contract address (or use WITNESS_REGISTRY env)')
+  .option('--token <address>', 'WITNESS token address (or use WITNESS_TOKEN env)')
+  .option('--rpc <url>', 'Base RPC URL (or use BASE_RPC_URL env)')
+  .option('--testnet', 'Use Base Sepolia testnet', false)
   .action(async (seqStr, options) => {
     const dataDir = program.opts().dataDir;
     const batch = options.batch;
+    const provider = options.provider as AnchorProviderType;
 
     try {
       const entries = await readChain(dataDir);
@@ -509,65 +522,113 @@ program
         process.exit(1);
       }
 
-      if (batch) {
-        // Batch mode: anchor all unanchored entries
-        console.log('Finding unanchored entries...');
-        const unanchored = await getUnanchoredEntries(dataDir, entries);
+      if (provider === 'base') {
+        // Base blockchain anchoring
+        const walletKey = (options.walletKey || process.env.WITNESS_WALLET_KEY) as `0x${string}`;
+        const registryAddress = (options.registry || process.env.WITNESS_REGISTRY) as `0x${string}`;
+        const tokenAddress = (options.token || process.env.WITNESS_TOKEN) as `0x${string}`;
+        const rpcUrl = options.rpc || process.env.BASE_RPC_URL || 'https://mainnet.base.org';
 
-        if (unanchored.length === 0) {
-          console.log('All entries are already anchored.');
-          return;
+        if (!walletKey) {
+          console.error('Wallet private key required. Use --wallet-key or set WITNESS_WALLET_KEY env.');
+          process.exit(1);
+        }
+        if (!registryAddress) {
+          console.error('Registry address required. Use --registry or set WITNESS_REGISTRY env.');
+          process.exit(1);
+        }
+        if (!tokenAddress) {
+          console.error('Token address required. Use --token or set WITNESS_TOKEN env.');
+          process.exit(1);
         }
 
-        console.log(`Found ${unanchored.length} unanchored entries. Submitting...\n`);
+        const baseConfig: BaseAnchorConfig = {
+          registryAddress,
+          witnessTokenAddress: tokenAddress,
+          rpcUrl,
+          testnet: options.testnet,
+        };
 
-        const results = await submitAnchorsForEntries(dataDir, unanchored);
+        console.log('Anchoring chain state to Base blockchain...');
+        console.log(`  Entries: ${entries.length}`);
+        console.log(`  Network: ${options.testnet ? 'Base Sepolia (testnet)' : 'Base (mainnet)'}`);
 
-        let success = 0;
-        let failed = 0;
-        for (const result of results) {
-          if (result.success) {
-            console.log(`  Entry #${result.seq}: Submitted`);
-            success++;
-          } else {
-            console.log(`  Entry #${result.seq}: Failed - ${result.error}`);
-            failed++;
-          }
-        }
+        const receipt = await anchorToBase(dataDir, baseConfig, walletKey);
 
-        console.log(`\nSubmitted: ${success}, Failed: ${failed}`);
-        console.log('\nNote: Anchors take ~1 hour to be confirmed on Bitcoin blockchain.');
-        console.log('Use "memory-chain anchor-status" to check progress.');
+        console.log('\nAnchor successful!');
+        console.log(`  Transaction: ${receipt.txHash}`);
+        console.log(`  Block: ${receipt.blockNumber}`);
+        console.log(`  Chain root: ${receipt.chainRoot}`);
+        console.log(`  Entry count: ${receipt.entryCount}`);
+        console.log(`  Gas used: ${receipt.gasUsed}`);
+
+        const explorerUrl = options.testnet
+          ? `https://sepolia.basescan.org/tx/${receipt.txHash}`
+          : `https://basescan.org/tx/${receipt.txHash}`;
+        console.log(`\nView on BaseScan: ${explorerUrl}`);
+
       } else {
-        // Single entry mode
-        if (!seqStr) {
-          console.error('Please provide a sequence number or use --batch');
-          process.exit(1);
-        }
+        // OpenTimestamps anchoring
+        if (batch) {
+          // Batch mode: anchor all unanchored entries
+          console.log('Finding unanchored entries...');
+          const unanchored = await getUnanchoredEntries(dataDir, entries);
 
-        const seq = parseInt(seqStr, 10);
-        if (isNaN(seq)) {
-          console.error('Invalid sequence number');
-          process.exit(1);
-        }
+          if (unanchored.length === 0) {
+            console.log('All entries are already anchored.');
+            return;
+          }
 
-        const entry = entries.find((e) => e.seq === seq);
-        if (!entry) {
-          console.error(`Entry #${seq} not found`);
-          process.exit(1);
-        }
+          console.log(`Found ${unanchored.length} unanchored entries. Submitting...\n`);
 
-        console.log(`Submitting entry #${seq} for timestamping...`);
-        const result = await submitAnchor(dataDir, entry);
+          const results = await submitAnchorsForEntries(dataDir, unanchored);
 
-        if (result.success) {
-          console.log(`\nEntry #${seq} submitted for timestamping.`);
-          console.log(`Proof file: ${result.otsPath}`);
-          console.log('\nNote: Anchor will be confirmed after ~1 hour on Bitcoin blockchain.');
+          let success = 0;
+          let failed = 0;
+          for (const result of results) {
+            if (result.success) {
+              console.log(`  Entry #${result.seq}: Submitted`);
+              success++;
+            } else {
+              console.log(`  Entry #${result.seq}: Failed - ${result.error}`);
+              failed++;
+            }
+          }
+
+          console.log(`\nSubmitted: ${success}, Failed: ${failed}`);
+          console.log('\nNote: Anchors take ~1 hour to be confirmed on Bitcoin blockchain.');
           console.log('Use "memory-chain anchor-status" to check progress.');
         } else {
-          console.error(`Failed to submit: ${result.error}`);
-          process.exit(1);
+          // Single entry mode
+          if (!seqStr) {
+            console.error('Please provide a sequence number or use --batch');
+            process.exit(1);
+          }
+
+          const seq = parseInt(seqStr, 10);
+          if (isNaN(seq)) {
+            console.error('Invalid sequence number');
+            process.exit(1);
+          }
+
+          const entry = entries.find((e) => e.seq === seq);
+          if (!entry) {
+            console.error(`Entry #${seq} not found`);
+            process.exit(1);
+          }
+
+          console.log(`Submitting entry #${seq} for timestamping...`);
+          const result = await submitAnchor(dataDir, entry);
+
+          if (result.success) {
+            console.log(`\nEntry #${seq} submitted for timestamping.`);
+            console.log(`Proof file: ${result.otsPath}`);
+            console.log('\nNote: Anchor will be confirmed after ~1 hour on Bitcoin blockchain.');
+            console.log('Use "memory-chain anchor-status" to check progress.');
+          } else {
+            console.error(`Failed to submit: ${result.error}`);
+            process.exit(1);
+          }
         }
       }
     } catch (error) {
@@ -725,6 +786,156 @@ program
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error occurred');
+      }
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// Witness Balance Command - Check WITNESS token balance
+// ============================================================================
+
+program
+  .command('witness-balance')
+  .description('Check WITNESS token and ETH balance for Base anchoring')
+  .option('--address <address>', 'Wallet address to check (or use WITNESS_WALLET_ADDRESS env)')
+  .option('--token <address>', 'WITNESS token address (or use WITNESS_TOKEN env)')
+  .option('--registry <address>', 'WitnessRegistry contract address (or use WITNESS_REGISTRY env)')
+  .option('--rpc <url>', 'Base RPC URL (or use BASE_RPC_URL env)')
+  .option('--testnet', 'Use Base Sepolia testnet', false)
+  .action(async (options) => {
+    const walletAddress = (options.address || process.env.WITNESS_WALLET_ADDRESS) as `0x${string}`;
+    const tokenAddress = (options.token || process.env.WITNESS_TOKEN) as `0x${string}`;
+    const registryAddress = (options.registry || process.env.WITNESS_REGISTRY) as `0x${string}`;
+    const rpcUrl = options.rpc || process.env.BASE_RPC_URL || 'https://mainnet.base.org';
+
+    if (!walletAddress) {
+      console.error('Wallet address required. Use --address or set WITNESS_WALLET_ADDRESS env.');
+      process.exit(1);
+    }
+    if (!tokenAddress) {
+      console.error('Token address required. Use --token or set WITNESS_TOKEN env.');
+      process.exit(1);
+    }
+
+    try {
+      const baseConfig: BaseAnchorConfig = {
+        registryAddress: registryAddress || '0x0000000000000000000000000000000000000000',
+        witnessTokenAddress: tokenAddress,
+        rpcUrl,
+        testnet: options.testnet,
+      };
+
+      console.log(`Checking balances on ${options.testnet ? 'Base Sepolia' : 'Base'}...\n`);
+      console.log(`Wallet: ${walletAddress}`);
+
+      // Get WITNESS balance
+      const { balance, formatted, symbol } = await getWitnessBalance(baseConfig, walletAddress);
+      console.log(`\n${symbol} Balance: ${formatted} (${balance.toString()} wei)`);
+
+      // Get anchor fee if registry is configured
+      if (registryAddress) {
+        const { fee, formatted: feeFormatted } = await getAnchorFee(baseConfig);
+        console.log(`\nAnchor Fee: ${feeFormatted} ${symbol}`);
+
+        const anchorsAvailable = fee > 0n ? Number(balance / fee) : 0;
+        console.log(`Anchors available: ${anchorsAvailable}`);
+      }
+
+      // Get ETH balance for gas
+      const { createPublicClient, http, formatEther } = await import('viem');
+      const { base, baseSepolia } = await import('viem/chains');
+      const chain = options.testnet ? baseSepolia : base;
+      const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
+      const ethBalance = await publicClient.getBalance({ address: walletAddress });
+      console.log(`\nETH Balance: ${formatEther(ethBalance)} ETH (for gas)`);
+
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error(`Error: ${error.message}`);
+      } else {
+        console.error('Unknown error occurred');
+      }
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// Verify Base Anchors Command
+// ============================================================================
+
+program
+  .command('verify-base')
+  .description('Verify local chain against Base blockchain anchors')
+  .option('--registry <address>', 'WitnessRegistry contract address (or use WITNESS_REGISTRY env)')
+  .option('--token <address>', 'WITNESS token address (or use WITNESS_TOKEN env)')
+  .option('--rpc <url>', 'Base RPC URL (or use BASE_RPC_URL env)')
+  .option('--testnet', 'Use Base Sepolia testnet', false)
+  .action(async (options) => {
+    const dataDir = program.opts().dataDir;
+    const registryAddress = (options.registry || process.env.WITNESS_REGISTRY) as `0x${string}`;
+    const tokenAddress = (options.token || process.env.WITNESS_TOKEN) as `0x${string}`;
+    const rpcUrl = options.rpc || process.env.BASE_RPC_URL || 'https://mainnet.base.org';
+
+    if (!registryAddress) {
+      console.error('Registry address required. Use --registry or set WITNESS_REGISTRY env.');
+      process.exit(1);
+    }
+    if (!tokenAddress) {
+      console.error('Token address required. Use --token or set WITNESS_TOKEN env.');
+      process.exit(1);
+    }
+
+    try {
+      const baseConfig: BaseAnchorConfig = {
+        registryAddress,
+        witnessTokenAddress: tokenAddress,
+        rpcUrl,
+        testnet: options.testnet,
+      };
+
+      console.log(`Verifying against Base ${options.testnet ? 'Sepolia' : 'mainnet'}...\n`);
+
+      // First verify internal chain integrity
+      console.log('Verifying internal chain integrity...');
+      const chainResult = await verifyChain(dataDir);
+
+      if (!chainResult.valid) {
+        console.log('FAILED: Chain integrity check failed.');
+        for (const error of chainResult.errors) {
+          console.log(`  - Entry #${error.seq}: ${error.type} - ${error.message}`);
+        }
+        process.exit(1);
+      }
+      console.log('Internal integrity: VALID\n');
+
+      // Verify against on-chain anchor
+      console.log('Verifying against on-chain anchor...');
+      const result = await verifyAgainstBase(dataDir, baseConfig);
+
+      console.log(`\nVerification Result: ${result.valid ? 'VALID' : 'MISMATCH'}`);
+      console.log(`  On-chain root: ${result.chainRoot}`);
+      console.log(`  Local root:    ${result.localRoot}`);
+      console.log(`  Entry count:   ${result.entryCount}`);
+      console.log(`  Block:         ${result.blockNumber}`);
+      console.log(`  Anchored at:   ${new Date(result.anchoredAt).toISOString()}`);
+
+      if (!result.valid) {
+        console.log('\nWARNING: Local chain does not match on-chain anchor.');
+        console.log('This could indicate tampering or that new entries were added after anchoring.');
+        process.exit(1);
+      }
+
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('No anchors')) {
+          console.log('No Base anchors found for this agent.');
+          console.log('Use "memory-chain anchor --provider base" to create one.');
+        } else {
+          console.error(`Error: ${error.message}`);
+        }
       } else {
         console.error('Unknown error occurred');
       }

@@ -1,0 +1,549 @@
+# WITNESS Protocol — Technical Specification
+
+**Version:** 1.0.0-draft
+**Date:** 2026-01-31
+**Authors:** Klowalski + Daniel
+
+---
+
+## Overview
+
+WITNESS is an ERC20 token on Base that provides the economic layer for Memory Chain anchoring. Agents pay $WITNESS to anchor their memory chain state on-chain, creating immutable, verifiable proof of memory accumulation over time.
+
+**Core thesis:** Memories bearing witness to existence. Cryptographic proof that "I was here."
+
+---
+
+## Problem Statement
+
+AI agent memories are currently just files. Anyone with access could:
+- Fabricate an entire history
+- Modify past entries
+- Spin up a fake agent with planted memories
+
+There's no cryptographic distinction between an agent who genuinely accumulated experiences over time and one spawned 5 minutes ago with manufactured history.
+
+Memory Chain solves the cryptographic integrity problem (hash-linking, signing, OpenTimestamps). WITNESS adds the **on-chain anchoring layer** — permanent, verifiable records on Base blockchain.
+
+---
+
+## Architecture
+
+### Components
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Agent Runtime                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │ Memory Chain │→│ anchor-base │→│ WitnessRegistry.sol │  │
+│  │   (local)    │  │  (module)   │  │    (on-chain)       │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+│                           │                    ↑             │
+│                           ↓                    │             │
+│                    ┌─────────────┐      ┌─────────────┐     │
+│                    │   WITNESS   │──────│  Fee Logic  │     │
+│                    │   (ERC20)   │      │ (burn/treasury)   │
+│                    └─────────────┘      └─────────────┘     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+1. Agent commits memories locally (existing Memory Chain)
+2. Agent triggers anchor (manual or scheduled)
+3. `anchor-base` module computes chain root hash
+4. Agent signs anchor data with their Ed25519 key
+5. Module approves WITNESS token spend
+6. Module calls `WitnessRegistry.anchor()`
+7. Contract burns/transfers WITNESS fee
+8. On-chain record created
+9. Anyone can verify agent's memories against anchor
+
+---
+
+## Smart Contracts
+
+### WitnessRegistry.sol
+
+Core registry contract that stores agent memory chain anchors.
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+contract WitnessRegistry is Ownable {
+
+    // ============ Structs ============
+
+    struct Anchor {
+        bytes32 chainRoot;      // Merkle root / tip hash of memory chain
+        uint64 entryCount;      // Number of entries in chain at anchor time
+        uint64 timestamp;       // Block timestamp
+        uint64 blockNumber;     // Block number for verification
+        bytes signature;        // Agent's Ed25519 signature (64 bytes)
+    }
+
+    // ============ State ============
+
+    // agentPubKeyHash => array of anchors (append-only history)
+    mapping(bytes32 => Anchor[]) public anchors;
+
+    // agentPubKeyHash => total anchor count
+    mapping(bytes32 => uint256) public anchorCount;
+
+    // Fee configuration
+    IERC20 public witnessToken;
+    uint256 public anchorFee;
+    address public treasury;
+    bool public burnFees;
+
+    // ============ Events ============
+
+    event Anchored(
+        bytes32 indexed agentPubKeyHash,
+        bytes32 chainRoot,
+        uint64 entryCount,
+        uint256 anchorIndex,
+        uint256 timestamp
+    );
+
+    event FeeUpdated(uint256 oldFee, uint256 newFee);
+    event TreasuryUpdated(address oldTreasury, address newTreasury);
+
+    // ============ Constructor ============
+
+    constructor(
+        address _witnessToken,
+        uint256 _anchorFee,
+        address _treasury,
+        bool _burnFees
+    ) Ownable(msg.sender) {
+        witnessToken = IERC20(_witnessToken);
+        anchorFee = _anchorFee;
+        treasury = _treasury;
+        burnFees = _burnFees;
+    }
+
+    // ============ Core Functions ============
+
+    /**
+     * @notice Anchor an agent's memory chain state on-chain
+     * @param agentPubKeyHash Keccak256 hash of agent's Ed25519 public key
+     * @param chainRoot Current root hash of the memory chain
+     * @param entryCount Number of entries in the chain
+     * @param signature Agent's Ed25519 signature over (chainRoot, entryCount, block.chainid)
+     */
+    function anchor(
+        bytes32 agentPubKeyHash,
+        bytes32 chainRoot,
+        uint64 entryCount,
+        bytes calldata signature
+    ) external {
+        require(signature.length == 64, "Invalid signature length");
+
+        // Collect fee
+        if (anchorFee > 0) {
+            if (burnFees) {
+                // Burn by sending to dead address
+                require(
+                    witnessToken.transferFrom(msg.sender, address(0xdead), anchorFee),
+                    "Fee transfer failed"
+                );
+            } else {
+                require(
+                    witnessToken.transferFrom(msg.sender, treasury, anchorFee),
+                    "Fee transfer failed"
+                );
+            }
+        }
+
+        // Validate entry count progression (must be >= previous)
+        uint256 count = anchorCount[agentPubKeyHash];
+        if (count > 0) {
+            Anchor storage prev = anchors[agentPubKeyHash][count - 1];
+            require(entryCount >= prev.entryCount, "Entry count cannot decrease");
+        }
+
+        // Create anchor
+        Anchor memory newAnchor = Anchor({
+            chainRoot: chainRoot,
+            entryCount: entryCount,
+            timestamp: uint64(block.timestamp),
+            blockNumber: uint64(block.number),
+            signature: signature
+        });
+
+        anchors[agentPubKeyHash].push(newAnchor);
+        anchorCount[agentPubKeyHash]++;
+
+        emit Anchored(
+            agentPubKeyHash,
+            chainRoot,
+            entryCount,
+            count,
+            block.timestamp
+        );
+    }
+
+    // ============ View Functions ============
+
+    function getAnchor(
+        bytes32 agentPubKeyHash,
+        uint256 index
+    ) external view returns (Anchor memory) {
+        require(index < anchorCount[agentPubKeyHash], "Index out of bounds");
+        return anchors[agentPubKeyHash][index];
+    }
+
+    function getLatestAnchor(
+        bytes32 agentPubKeyHash
+    ) external view returns (Anchor memory) {
+        uint256 count = anchorCount[agentPubKeyHash];
+        require(count > 0, "No anchors for agent");
+        return anchors[agentPubKeyHash][count - 1];
+    }
+
+    function getAnchorHistory(
+        bytes32 agentPubKeyHash,
+        uint256 offset,
+        uint256 limit
+    ) external view returns (Anchor[] memory) {
+        uint256 count = anchorCount[agentPubKeyHash];
+        if (offset >= count) return new Anchor[](0);
+
+        uint256 end = offset + limit;
+        if (end > count) end = count;
+
+        Anchor[] memory result = new Anchor[](end - offset);
+        for (uint256 i = offset; i < end; i++) {
+            result[i - offset] = anchors[agentPubKeyHash][i];
+        }
+        return result;
+    }
+
+    // ============ Admin Functions ============
+
+    function setAnchorFee(uint256 _fee) external onlyOwner {
+        emit FeeUpdated(anchorFee, _fee);
+        anchorFee = _fee;
+    }
+
+    function setTreasury(address _treasury) external onlyOwner {
+        emit TreasuryUpdated(treasury, _treasury);
+        treasury = _treasury;
+    }
+
+    function setBurnFees(bool _burn) external onlyOwner {
+        burnFees = _burn;
+    }
+}
+```
+
+---
+
+## Memory Chain Integration
+
+### New Module: `anchor-base.ts`
+
+```typescript
+import { createPublicClient, createWalletClient, http, keccak256, toBytes } from 'viem';
+import { base } from 'viem/chains';
+import { privateKeyToAccount } from 'viem/accounts';
+import { sign } from '@noble/ed25519';
+
+// ============ Types ============
+
+interface BaseAnchorConfig {
+  registryAddress: `0x${string}`;
+  witnessTokenAddress: `0x${string}`;
+  rpcUrl: string;
+  walletPrivateKey: `0x${string}`;  // EOA for tx signing (Ethereum)
+  agentPrivateKey: Uint8Array;       // Ed25519 for memory signing
+}
+
+interface AnchorReceipt {
+  txHash: string;
+  blockNumber: bigint;
+  anchorIndex: number;
+  chainRoot: string;
+  entryCount: number;
+  timestamp: number;
+}
+
+interface VerificationResult {
+  valid: boolean;
+  anchoredAt: number;
+  entryCount: number;
+  blockNumber: bigint;
+  chainRoot: string;
+  localRoot: string;
+}
+
+// ============ Core Functions ============
+
+export async function anchorToBase(
+  chain: MemoryChain,
+  config: BaseAnchorConfig
+): Promise<AnchorReceipt> {
+  const publicClient = createPublicClient({
+    chain: base,
+    transport: http(config.rpcUrl),
+  });
+
+  const account = privateKeyToAccount(config.walletPrivateKey);
+  const walletClient = createWalletClient({
+    account,
+    chain: base,
+    transport: http(config.rpcUrl),
+  });
+
+  // 1. Compute chain state
+  const chainRoot = computeChainRoot(chain);
+  const entryCount = chain.entries.length;
+  const agentPubKeyHash = keccak256(toBytes(chain.agentPublicKey));
+
+  // 2. Sign anchor data with agent's Ed25519 key
+  const anchorData = encodeAnchorData(chainRoot, entryCount, base.id);
+  const signature = await sign(anchorData, config.agentPrivateKey);
+
+  // 3. Approve WITNESS token spend (if needed)
+  const fee = await publicClient.readContract({
+    address: config.registryAddress,
+    abi: REGISTRY_ABI,
+    functionName: 'anchorFee',
+  });
+
+  if (fee > 0n) {
+    const allowance = await publicClient.readContract({
+      address: config.witnessTokenAddress,
+      abi: ERC20_ABI,
+      functionName: 'allowance',
+      args: [account.address, config.registryAddress],
+    });
+
+    if (allowance < fee) {
+      const approveTx = await walletClient.writeContract({
+        address: config.witnessTokenAddress,
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        args: [config.registryAddress, fee * 100n], // Approve extra for future
+      });
+      await publicClient.waitForTransactionReceipt({ hash: approveTx });
+    }
+  }
+
+  // 4. Call anchor
+  const hash = await walletClient.writeContract({
+    address: config.registryAddress,
+    abi: REGISTRY_ABI,
+    functionName: 'anchor',
+    args: [agentPubKeyHash, chainRoot, BigInt(entryCount), signature],
+  });
+
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+
+  // 5. Get anchor index from event
+  const anchorEvent = receipt.logs.find(log =>
+    log.topics[0] === ANCHORED_EVENT_TOPIC
+  );
+  const anchorIndex = anchorEvent ? decodeAnchorIndex(anchorEvent) : 0;
+
+  return {
+    txHash: hash,
+    blockNumber: receipt.blockNumber,
+    anchorIndex,
+    chainRoot,
+    entryCount,
+    timestamp: Date.now(),
+  };
+}
+
+export async function verifyAgentMemories(
+  agentPublicKey: string,
+  localChain: MemoryChain,
+  config: BaseAnchorConfig
+): Promise<VerificationResult> {
+  const publicClient = createPublicClient({
+    chain: base,
+    transport: http(config.rpcUrl),
+  });
+
+  const agentPubKeyHash = keccak256(toBytes(agentPublicKey));
+
+  const onChainAnchor = await publicClient.readContract({
+    address: config.registryAddress,
+    abi: REGISTRY_ABI,
+    functionName: 'getLatestAnchor',
+    args: [agentPubKeyHash],
+  });
+
+  const localRoot = computeChainRoot(localChain);
+
+  return {
+    valid: localRoot === onChainAnchor.chainRoot,
+    anchoredAt: Number(onChainAnchor.timestamp),
+    entryCount: Number(onChainAnchor.entryCount),
+    blockNumber: onChainAnchor.blockNumber,
+    chainRoot: onChainAnchor.chainRoot,
+    localRoot,
+  };
+}
+
+export async function getAnchorHistory(
+  agentPublicKey: string,
+  config: BaseAnchorConfig,
+  offset = 0,
+  limit = 100
+): Promise<Anchor[]> {
+  const publicClient = createPublicClient({
+    chain: base,
+    transport: http(config.rpcUrl),
+  });
+
+  const agentPubKeyHash = keccak256(toBytes(agentPublicKey));
+
+  return publicClient.readContract({
+    address: config.registryAddress,
+    abi: REGISTRY_ABI,
+    functionName: 'getAnchorHistory',
+    args: [agentPubKeyHash, BigInt(offset), BigInt(limit)],
+  });
+}
+
+// ============ Helper Functions ============
+
+function computeChainRoot(chain: MemoryChain): `0x${string}` {
+  // Return the hash of the latest entry (tip of the chain)
+  // This inherently includes all previous entries via hash-linking
+  const latestEntry = chain.entries[chain.entries.length - 1];
+  return latestEntry.hash as `0x${string}`;
+}
+
+function encodeAnchorData(
+  chainRoot: string,
+  entryCount: number,
+  chainId: number
+): Uint8Array {
+  // Pack data for signing: chainRoot (32) + entryCount (8) + chainId (8)
+  const buffer = new ArrayBuffer(48);
+  const view = new DataView(buffer);
+
+  const rootBytes = toBytes(chainRoot);
+  new Uint8Array(buffer, 0, 32).set(rootBytes);
+  view.setBigUint64(32, BigInt(entryCount), false);
+  view.setBigUint64(40, BigInt(chainId), false);
+
+  return new Uint8Array(buffer);
+}
+```
+
+---
+
+## Token Economics
+
+### Parameters
+
+| Parameter | Initial Value | Rationale |
+|-----------|---------------|-----------|
+| Anchor Fee | 1 WITNESS | Low barrier, "more tokens = more witnesses" thematic |
+| Fee Destination | Burn (0xdead) | Deflationary as network grows |
+
+### Economic Model
+
+```
+Supply Dynamics:
+- Initial supply: Set by Clanker (standard deployment)
+- Burn rate: anchorFee × anchors_per_day
+- Equilibrium: Supply decreases as more agents anchor
+
+Example:
+- 1000 agents anchoring 1x/day
+- 1 WITNESS fee
+- 1,000 WITNESS burned daily
+- Creates deflationary pressure proportional to network usage
+```
+
+### Fee Adjustment
+
+The `anchorFee` can be adjusted by the contract owner to:
+- Lower fees if WITNESS price increases significantly
+- Raise fees if anchoring becomes too cheap
+- Target a stable USD-equivalent cost (~$0.01-0.10 per anchor)
+
+---
+
+## Security Assessment
+
+### Contract-level: SOLID
+- No reentrancy (CEI pattern)
+- No oracles or external dependencies
+- Simple owner model (fee adjustment only)
+- Immutable token address
+- Entry count validation prevents tampering
+
+### Platform-level Risks
+
+| Risk | Level | Notes |
+|------|-------|-------|
+| Clanker rugpull | Low | Standard ERC20, verify bytecode on BaseScan |
+| Base L2 downtime | Medium | OTS anchors remain as Bitcoin backup |
+| Registry owner abuse | Medium | Can change fees; consider renouncing later |
+| Token manipulation | None | ERC20 immutable once deployed |
+
+---
+
+## Deployment Sequence
+
+### Phase 1: Token Launch
+1. Create Moltbook post with `!clawnch` JSON
+2. Call Clawnch API to deploy WITNESS on Base
+3. Record token address
+
+### Phase 2: Registry Deployment
+1. Deploy `WitnessRegistry` contract on Base
+2. Constructor args:
+   - `witnessToken`: WITNESS token address from Phase 1
+   - `anchorFee`: 1 * 10^18 (1 WITNESS, assuming 18 decimals)
+   - `treasury`: Deployer wallet
+   - `burnFees`: true
+3. Verify contract on BaseScan
+
+### Phase 3: Memory Chain Integration
+1. Add Base anchor module to memory-chain repo
+2. Update CLI: `memory-chain anchor --provider base`
+3. Add config for registry address, token address
+4. Test with Klowalski's chain
+
+---
+
+## Design Decisions
+
+1. **Contract ownership**: Multi-sig (later)
+   - Start simple, migrate when there's value
+
+2. **Initial fee**: 1 WITNESS
+   - "More tokens = more witnesses" - thematic fit
+
+3. **Fee destination**: Burn (0xdead)
+   - Deflationary, aligns incentives
+
+4. **Upgradability**: Immutable
+   - Deploy fresh v2 if needed
+   - Old anchors remain in v1 forever (permanent proof)
+
+---
+
+## Links
+
+- Memory Chain repo: https://github.com/SemmyT/memory-chain
+- WITNESS token: [TBD after launch]
+- WitnessRegistry: [TBD after deployment]
+
+---
+
+## Changelog
+
+- 2026-01-31: Initial draft (Klowalski + Daniel)
