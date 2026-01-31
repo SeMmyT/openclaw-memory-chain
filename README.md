@@ -2,7 +2,7 @@
 
 **Cryptographic proof-of-experience for AI agents.**
 
-Memory Chain provides tamper-evident, verifiable memory storage for AI agents. Every memory is signed with Ed25519, linked via SHA-256 hash chains, and optionally anchored to the Bitcoin blockchain via OpenTimestamps.
+Memory Chain provides tamper-evident, verifiable memory storage for AI agents. Every memory is signed with Ed25519, linked via SHA-256 hash chains, and optionally anchored to external blockchains via OpenTimestamps (Bitcoin) or the WITNESS protocol (Base).
 
 ## The Vision
 
@@ -95,8 +95,10 @@ Memory Chain uses a dual-layer architecture:
               └───────────┬───────────┘
                           │
               ┌───────────┴───────────┐
-              │   OpenTimestamps      │
-              │   (Bitcoin Anchoring) │
+              │   External Anchoring   │
+              ├───────────────────────┤
+              │ • OpenTimestamps (BTC)│
+              │ • Base + $WITNESS     │
               └───────────────────────┘
 ```
 
@@ -323,6 +325,81 @@ if (verification.status === 'confirmed') {
 }
 ```
 
+## Base Blockchain Anchoring (WITNESS Protocol)
+
+Memory Chain can also anchor to the Base L2 blockchain using the WITNESS protocol. This provides faster confirmation times and on-chain verification.
+
+### How It Works
+
+1. Agent commits memories locally (standard Memory Chain)
+2. Agent triggers anchor to Base blockchain
+3. Chain root hash is computed and signed with Ed25519
+4. `$WITNESS` token fee is burned + small ETH dust fee collected
+5. On-chain record created in WitnessRegistry contract
+6. Anyone can verify agent's memories against the anchor
+
+### CLI Usage
+
+```bash
+# Anchor current chain state to Base
+memory-chain anchor --provider base
+
+# Verify against on-chain anchor
+memory-chain verify --provider base
+
+# Check anchor history
+memory-chain anchor-status --provider base
+```
+
+### Programmatic Usage
+
+```typescript
+import {
+  anchorToBase,
+  verifyAgainstBase,
+  getBaseAnchorHistory,
+  getWitnessBalance,
+} from 'witness-memory-chain';
+
+// Anchor to Base (requires wallet with WITNESS tokens + ETH)
+const receipt = await anchorToBase(dataDir, {
+  registryAddress: '0x...',
+  witnessTokenAddress: '0x...',
+  rpcUrl: 'https://mainnet.base.org',
+}, walletPrivateKey);
+
+console.log(`Anchored at block ${receipt.blockNumber}`);
+console.log(`Tx: ${receipt.txHash}`);
+
+// Verify local chain matches on-chain anchor
+const result = await verifyAgainstBase(dataDir, config);
+if (result.valid) {
+  console.log(`Chain verified against on-chain anchor from ${result.anchoredAt}`);
+}
+
+// Get anchor history
+const history = await getBaseAnchorHistory(dataDir, config);
+```
+
+### Cost
+
+| Fee | Amount | Purpose |
+|-----|--------|---------|
+| WITNESS token | ~1 WITNESS | Burned (deflationary) |
+| ETH dust | ~0.0001 ETH | Project sustainability |
+
+### OpenTimestamps vs Base Anchoring
+
+| Feature | OpenTimestamps | Base + WITNESS |
+|---------|---------------|----------------|
+| Blockchain | Bitcoin | Base L2 |
+| Confirmation | ~1 hour | ~2 seconds |
+| Cost | Free | WITNESS + dust |
+| Verification | Offline possible | On-chain query |
+| Best for | Archival proof | Real-time verification |
+
+Both anchoring methods can be used together for maximum assurance.
+
 ## Key Management
 
 Memory Chain supports three key storage modes:
@@ -420,8 +497,8 @@ commands:
 ```json
 {
   "skills": {
-    "memory-chain": {
-      "dataDir": "~/.openclaw/memory-chain",
+    "witness-memory-chain": {
+      "dataDir": "~/.witness/memory-chain",
       "autoCommit": {
         "onSignificance": true,
         "significanceThreshold": 0.7,
@@ -465,20 +542,21 @@ commands:
 ## File Structure
 
 ```
-~/.openclaw/memory-chain/
-├── config.json       # Chain configuration
-├── chain.jsonl       # Append-only entry log
-├── agent.key         # Private key (raw mode)
-├── agent.key.enc     # Private key (encrypted mode)
-├── agent.pub         # Public key
-├── memory.db         # SQLite index (rebuildable)
-├── content/          # Content-addressable storage
-│   ├── a1b2c3...     # Content files named by SHA-256 hash
+~/.witness/memory-chain/
+├── config.json          # Chain configuration
+├── chain.jsonl          # Append-only entry log
+├── agent.key            # Private key (raw mode)
+├── agent.key.enc        # Private key (encrypted mode)
+├── agent.pub            # Public key
+├── memory.db            # SQLite index (rebuildable)
+├── content/             # Content-addressable storage
+│   ├── a1b2c3...        # Content files named by SHA-256 hash
 │   └── d4e5f6...
-└── anchors/          # OpenTimestamps proofs
-    ├── pending.json  # Pending anchor records
-    ├── entry-0.ots   # Proof files
-    └── entry-1.ots
+└── anchors/             # Blockchain anchoring proofs
+    ├── pending.json     # Pending OTS anchor records
+    ├── entry-0.ots      # OpenTimestamps proof files
+    ├── entry-1.ots
+    └── base-anchors.json  # Base blockchain anchor records
 ```
 
 ## API Reference
@@ -538,6 +616,17 @@ getAnchorStatus(dataDir)           // Get all anchor statuses
 hasAnchor(dataDir, seq)            // Check if entry is anchored
 ```
 
+### Base Anchoring
+
+```typescript
+anchorToBase(dataDir, config, walletKey)  // Anchor chain state to Base
+verifyAgainstBase(dataDir, config)        // Verify against on-chain anchor
+getBaseAnchorHistory(dataDir, config)     // Get anchor history
+getWitnessBalance(config, address)        // Check WITNESS token balance
+getAnchorFee(config)                      // Get current WITNESS fee
+getEthDustFee(config)                     // Get current ETH dust fee
+```
+
 ### Compression
 
 ```typescript
@@ -575,6 +664,7 @@ Test coverage includes:
 | `@noble/hashes` | SHA-256, scrypt (audited) |
 | `better-sqlite3` | SQLite with FTS5 |
 | `@lacrypta/typescript-opentimestamps` | OpenTimestamps protocol |
+| `viem` | Base blockchain interactions |
 | `proper-lockfile` | Atomic file operations |
 | `commander` | CLI framework |
 
