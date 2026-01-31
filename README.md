@@ -1,0 +1,531 @@
+# Memory Chain
+
+**Cryptographic proof-of-experience for AI agents.**
+
+Memory Chain provides tamper-evident, verifiable memory storage for AI agents. Every memory is signed with Ed25519, linked via SHA-256 hash chains, and optionally anchored to the Bitcoin blockchain via OpenTimestamps.
+
+## Why Memory Chain?
+
+AI agents face a fundamental trust problem: how can users verify that an agent's memories haven't been tampered with? How can an agent prove what it knew and when?
+
+Memory Chain solves this by treating agent memory like a blockchain:
+
+- **Integrity**: Every memory is cryptographically signed and hash-linked to the previous entry
+- **Non-repudiation**: The agent can prove it recorded specific information at specific times
+- **Auditability**: The entire memory history can be verified by third parties
+- **Temporal proof**: OpenTimestamps anchoring provides Bitcoin-backed proof of existence
+
+This enables scenarios like:
+
+- Agents that can prove they were given specific instructions
+- Verifiable decision logs for compliance
+- Tamper-evident preference storage
+- Auditable AI assistants for regulated industries
+
+## Architecture
+
+Memory Chain uses a dual-layer architecture:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Application Layer                          │
+│  (Claude Code Skill, Telegram Bot, Custom Applications)         │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+┌────────────────────────────┴────────────────────────────────────┐
+│                      Memory Chain API                            │
+│  initChain · addEntry · verifyChain · retrieveMemories          │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+        ┌────────────────────┴────────────────────┐
+        │                                         │
+┌───────┴───────┐                        ┌────────┴────────┐
+│  Chain Layer  │                        │   Index Layer   │
+│  (Integrity)  │                        │  (Retrieval)    │
+├───────────────┤                        ├─────────────────┤
+│ • JSONL file  │                        │ • SQLite + FTS5 │
+│ • Ed25519 sig │                        │ • Hybrid scoring│
+│ • SHA-256 hash│                        │ • Token budget  │
+│ • Append-only │                        │ • Rebuildable   │
+└───────┬───────┘                        └────────┬────────┘
+        │                                         │
+        └─────────────────┬───────────────────────┘
+                          │
+              ┌───────────┴───────────┐
+              │   Content Store       │
+              │ (Content-Addressable) │
+              ├───────────────────────┤
+              │ • SHA-256 naming      │
+              │ • Deduplication       │
+              │ • Redaction support   │
+              └───────────┬───────────┘
+                          │
+              ┌───────────┴───────────┐
+              │   OpenTimestamps      │
+              │   (Bitcoin Anchoring) │
+              └───────────────────────┘
+```
+
+### Chain Layer (Integrity)
+
+The chain layer provides cryptographic integrity guarantees:
+
+- **JSONL Storage**: Human-readable, append-only, easy to debug
+- **Ed25519 Signatures**: Every entry signed with agent's private key
+- **SHA-256 Hash Chain**: Each entry includes hash of previous entry
+- **Canonical Serialization**: Deterministic JSON for consistent signatures
+
+### Index Layer (Retrieval)
+
+The index layer provides fast, intelligent memory retrieval:
+
+- **SQLite + FTS5**: Full-text search with BM25 ranking
+- **Hybrid Scoring**: Combines keyword match, recency, importance, and access frequency
+- **Token Budgeting**: Fits retrieved memories within context window limits
+- **Rebuildable**: Can be regenerated from chain at any time
+
+### Content Store (Storage)
+
+Content-addressable storage enables efficient and flexible content handling:
+
+- **Deduplication**: Identical content stored once
+- **Redaction**: Delete content while preserving chain integrity
+- **Verification**: Content can be verified against stored hash
+
+## Installation
+
+```bash
+npm install @openclaw/memory-chain
+```
+
+Or clone and build:
+
+```bash
+git clone https://github.com/SeMmyT/openclaw-memory-chain.git
+cd openclaw-memory-chain
+npm install
+npm run build
+```
+
+## Quick Start
+
+### CLI Usage
+
+```bash
+# Initialize a new memory chain
+memory-chain init --name "MyAgent"
+
+# Add a memory
+memory-chain add "User prefers dark mode" --type memory --tier relationship
+
+# Search memories
+memory-chain search "preferences"
+
+# Verify chain integrity
+memory-chain verify
+
+# View statistics
+memory-chain stats
+
+# Submit entries for Bitcoin timestamping
+memory-chain anchor --batch
+
+# Check anchor status
+memory-chain anchor-status --upgrade
+```
+
+### Programmatic Usage
+
+```typescript
+import {
+  initChain,
+  addEntry,
+  verifyChain,
+  retrieveMemories,
+  initIndex,
+  rebuildFromChain,
+  readChain,
+  createContentLoader,
+} from '@openclaw/memory-chain';
+
+// Initialize a new chain
+await initChain('~/.myagent/memory', { agentName: 'MyAgent' });
+
+// Add memories
+await addEntry('~/.myagent/memory', {
+  type: 'memory',
+  tier: 'relationship',
+  content: 'User prefers dark mode and minimal notifications',
+});
+
+await addEntry('~/.myagent/memory', {
+  type: 'decision',
+  tier: 'committed',
+  content: 'Agreed to always confirm before sending emails',
+  metadata: { context: 'email-settings-discussion' },
+});
+
+// Verify integrity
+const result = await verifyChain('~/.myagent/memory');
+console.log(result.valid); // true
+console.log(result.entriesChecked); // 3 (genesis + 2 entries)
+
+// Search memories with hybrid retrieval
+const db = initIndex('~/.myagent/memory/memory.db');
+const entries = await readChain('~/.myagent/memory');
+const contentLoader = createContentLoader('~/.myagent/memory/content');
+await rebuildFromChain(db, entries, contentLoader);
+
+const memories = retrieveMemories(db, 'user preferences', {
+  maxTokens: 2000,
+  maxResults: 10,
+});
+
+for (const memory of memories) {
+  console.log(`[${memory.type}] ${memory.content} (score: ${memory.score})`);
+}
+```
+
+## Entry Types and Tiers
+
+### Entry Types
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| `memory` | General information | "User's timezone is PST" |
+| `identity` | Agent identity/values | "I am a helpful coding assistant" |
+| `decision` | Agreed-upon behaviors | "Always ask before modifying production" |
+| `redaction` | Marks deleted content | System-generated when redacting |
+
+### Memory Tiers
+
+| Tier | Persistence | Redaction | Use Case |
+|------|-------------|-----------|----------|
+| `committed` | Permanent | Not allowed | Core identity, critical decisions |
+| `relationship` | Long-term | Allowed | User preferences, learned behaviors |
+| `ephemeral` | Session-based | Auto-expires | Temporary context, scratch notes |
+
+## Hybrid Retrieval System
+
+Memory Chain uses a sophisticated hybrid scoring system for retrieval:
+
+```
+Score = (0.4 × FTS) + (0.3 × Recency) + (0.2 × Importance) + (0.1 × Access)
+```
+
+- **FTS Score (40%)**: BM25 keyword relevance from SQLite FTS5
+- **Recency Score (30%)**: Exponential decay with 7-day half-life
+- **Importance Score (20%)**: User-assigned or auto-detected importance (0-1)
+- **Access Score (10%)**: How frequently the memory is retrieved
+
+### Token Budgeting
+
+Retrieved memories are packed within a token budget:
+
+```typescript
+const memories = retrieveMemories(db, 'deployment process', {
+  maxTokens: 2000, // Fit within context window
+  maxResults: 20,
+  minImportance: 0.5,
+});
+
+// Format for injection into system prompt
+const contextBlock = formatMemoriesForPrompt(memories);
+```
+
+## OpenTimestamps Integration
+
+Memory Chain can anchor entries to the Bitcoin blockchain via OpenTimestamps, providing third-party verifiable proof of existence:
+
+```typescript
+import {
+  submitAnchor,
+  upgradePendingAnchors,
+  verifyAnchor,
+  getAnchorStatus,
+} from '@openclaw/memory-chain';
+
+// Submit an entry for timestamping
+const entry = await addEntry(dataDir, { type: 'decision', content: '...' });
+const result = await submitAnchor(dataDir, entry);
+// result.otsPath contains path to .ots proof file
+
+// Anchors take ~1 hour to confirm on Bitcoin
+// Check and upgrade pending anchors:
+const status = await upgradePendingAnchors(dataDir);
+console.log(`Confirmed: ${status.confirmed}, Pending: ${status.pending}`);
+
+// Verify an anchor
+const verification = await verifyAnchor(dataDir, entry.seq);
+if (verification.status === 'confirmed') {
+  console.log(`Proven to exist before: ${verification.blockTimestamp}`);
+}
+```
+
+## Key Management
+
+Memory Chain supports three key storage modes:
+
+### Raw Mode (Default)
+
+Private key stored as hex in `agent.key` with 0600 permissions:
+
+```typescript
+await initChain(dataDir, { keyMode: 'raw' });
+```
+
+### Encrypted Mode
+
+Private key encrypted with password using scrypt + AES-256-GCM:
+
+```typescript
+import { setPasswordProvider, initChain } from '@openclaw/memory-chain';
+
+// Set up password provider
+setPasswordProvider(async () => {
+  return await promptUserForPassword();
+});
+
+await initChain(dataDir, {
+  keyMode: 'encrypted',
+  encryptionOptions: {
+    scryptN: 32768, // Cost parameter (default: 16384)
+  },
+});
+```
+
+### Environment Mode
+
+Private key stored in `MEMORY_CHAIN_PRIVATE_KEY` environment variable:
+
+```typescript
+await initChain(dataDir, { keyMode: 'env' });
+// Prints the key - user must set env var
+```
+
+## Export and Import
+
+### Export Chain
+
+```typescript
+import { exportChain, exportChainToFile } from '@openclaw/memory-chain';
+
+// Export to object
+const exported = await exportChain(dataDir, {
+  includeContent: true,
+  fromSeq: 10, // Optional: start from entry 10
+  toSeq: 50, // Optional: end at entry 50
+});
+
+// Export to file
+await exportChainToFile(dataDir, 'backup.json', { includeContent: true });
+```
+
+### Import Chain
+
+```typescript
+import { importChain, importChainFromFile } from '@openclaw/memory-chain';
+
+// Import from file
+const result = await importChainFromFile('backup.json', newDataDir);
+if (result.success) {
+  console.log(`Imported ${result.entriesImported} entries`);
+}
+```
+
+## Claude Code Skill Integration
+
+Memory Chain includes a Claude Code skill for Telegram-based agents:
+
+```yaml
+# skill/SKILL.md
+hooks:
+  agent:bootstrap: # Inject relevant memories on startup
+  command:reset: # Auto-commit session summary on reset
+commands:
+  memory: # /memory search, commit, verify, stats, export
+```
+
+### Commands
+
+- `/memory search <query>` - Search memories with hybrid scoring
+- `/memory commit <text>` - Manually commit a memory
+- `/memory verify` - Verify chain integrity
+- `/memory stats` - Show chain statistics
+- `/memory export` - Export chain (DM only)
+
+### Configuration
+
+```json
+{
+  "skills": {
+    "memory-chain": {
+      "dataDir": "~/.openclaw/memory-chain",
+      "autoCommit": {
+        "onSignificance": true,
+        "significanceThreshold": 0.7,
+        "keywords": ["remember", "note that", "important"]
+      },
+      "retrieval": {
+        "maxTokens": 2000,
+        "maxResults": 20
+      }
+    }
+  }
+}
+```
+
+## Security Considerations
+
+### Strengths
+
+| Area | Implementation |
+|------|---------------|
+| **Cryptography** | Uses audited @noble libraries (ed25519, hashes) - no homebrew crypto |
+| **Input Validation** | Content max 1MB, metadata depth 5, string max 10K chars |
+| **Key Storage** | Private key files created with 0o600 permissions |
+| **Atomic Operations** | Uses proper-lockfile for concurrent write safety |
+| **Signature Verification** | Every entry signed + hash-chained |
+
+### Limitations
+
+| Issue | Details |
+|-------|---------|
+| **Unencrypted content at rest** | Content stored in plaintext. Use encrypted keyMode for key protection, but content itself isn't encrypted. |
+| **Scrypt cost** | Default N=16384 (2^14). Increase for high-security scenarios. |
+
+### Recommendations
+
+1. Use `encrypted` keyMode for production deployments
+2. Store data directory on encrypted filesystem for content-at-rest encryption
+3. Restrict data directory permissions (`chmod 700`)
+4. Use OpenTimestamps for critical decisions requiring external proof
+
+## File Structure
+
+```
+~/.openclaw/memory-chain/
+├── config.json       # Chain configuration
+├── chain.jsonl       # Append-only entry log
+├── agent.key         # Private key (raw mode)
+├── agent.key.enc     # Private key (encrypted mode)
+├── agent.pub         # Public key
+├── memory.db         # SQLite index (rebuildable)
+├── content/          # Content-addressable storage
+│   ├── a1b2c3...     # Content files named by SHA-256 hash
+│   └── d4e5f6...
+└── anchors/          # OpenTimestamps proofs
+    ├── pending.json  # Pending anchor records
+    ├── entry-0.ots   # Proof files
+    └── entry-1.ots
+```
+
+## API Reference
+
+### Chain Operations
+
+```typescript
+initChain(dataDir, options?)       // Initialize new chain
+addEntry(dataDir, input)           // Add entry to chain
+readChain(dataDir)                 // Read all entries
+getLastEntry(dataDir)              // Get most recent entry
+verifyChain(dataDir)               // Verify chain integrity
+getChainStats(dataDir)             // Get statistics
+loadConfig(dataDir)                // Load chain config
+setPasswordProvider(fn)            // Set password callback for encrypted keys
+```
+
+### Index Operations
+
+```typescript
+initIndex(dbPath)                  // Open/create SQLite index
+closeIndex(db)                     // Close database
+insertMemory(db, memory)           // Insert memory record
+rebuildFromChain(db, entries, loader)  // Rebuild index from chain
+getMemoryCount(db)                 // Count indexed memories
+```
+
+### Retrieval Operations
+
+```typescript
+retrieveMemories(db, query, opts)  // Hybrid retrieval with scoring
+retrieveContext(db, opts)          // Context retrieval (no query)
+searchByKeyword(db, query, limit)  // Raw FTS5 search
+getRecentMemories(db, days, limit) // Get recent memories
+fillTokenBudget(memories, maxTokens)  // Pack within token limit
+formatMemoriesForPrompt(memories)  // Format for system prompt
+estimateTokens(text)               // Estimate token count
+```
+
+### Content Store
+
+```typescript
+storeContent(contentDir, content)  // Store and return hash
+getContent(contentDir, hash)       // Retrieve by hash
+getContentVerified(contentDir, hash)  // Retrieve with verification
+deleteContent(contentDir, hash)    // Delete (for redaction)
+verifyContent(contentDir, hash)    // Check hash matches
+```
+
+### OpenTimestamps
+
+```typescript
+submitAnchor(dataDir, entry)       // Submit for timestamping
+upgradePendingAnchors(dataDir)     // Check/upgrade pending
+verifyAnchor(dataDir, seq)         // Verify anchor proof
+getAnchorStatus(dataDir)           // Get all anchor statuses
+hasAnchor(dataDir, seq)            // Check if entry is anchored
+```
+
+### Compression
+
+```typescript
+compressText(text, options)        // Extractive summarization
+generateMemorySummary(content)     // Generate memory summary
+extractEntities(text)              // Extract named entities
+```
+
+## Testing
+
+```bash
+# Run tests
+npm test
+
+# Run tests once (CI mode)
+npm run test:run
+
+# Type checking
+npm run lint
+```
+
+Test coverage includes:
+- Chain initialization, verification, and signing
+- Hybrid retrieval scoring
+- Content store operations
+- OpenTimestamps submission and verification
+- Compression and entity extraction
+- Metrics collection
+
+## Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `@noble/ed25519` | Ed25519 signing (audited) |
+| `@noble/hashes` | SHA-256, scrypt (audited) |
+| `better-sqlite3` | SQLite with FTS5 |
+| `@lacrypta/typescript-opentimestamps` | OpenTimestamps protocol |
+| `proper-lockfile` | Atomic file operations |
+| `commander` | CLI framework |
+
+## License
+
+MIT
+
+## Contributing
+
+Contributions welcome! Please ensure:
+
+1. Tests pass (`npm run test:run`)
+2. Types check (`npm run lint`)
+3. Follow existing code style
+4. Add tests for new features
