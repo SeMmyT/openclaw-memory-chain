@@ -1,5 +1,5 @@
 /**
- * @witness/memory-chain
+ * witness-memory-chain
  *
  * Cryptographic proof of experience for AI agents with efficient retrieval.
  *

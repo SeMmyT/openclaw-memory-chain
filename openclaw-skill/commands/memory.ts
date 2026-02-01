@@ -24,8 +24,8 @@ import {
   createContentLoader,
   getStorageStats,
   getAnchorStatus,
-} from '@witness/memory-chain';
-import type { ChainEntryInput, EntryType, Tier } from '@witness/memory-chain';
+} from 'witness-memory-chain';
+import type { ChainEntryInput, EntryType, Tier } from 'witness-memory-chain';
 
 /** Configuration for the memory command */
 export interface MemoryCommandConfig {
