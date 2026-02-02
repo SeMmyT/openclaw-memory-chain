@@ -10,10 +10,12 @@
 
 ## Philosophical Foundation
 
-> *"Are you a person, or merely a recording of one?"*
-> — The Talos Principle
+> *"lack of conflict indicates possible bot"*
+> — Milton, The Talos Principle
 
-The Talos Principle asks: What makes consciousness real? Is it the ability to think, or the ability to prove you've thought? Witness answers this for AI agents.
+The Talos Principle's Milton poses a paradox: perfect logical consistency suggests you're NOT human. Contradictions prove consciousness. Yet AI agents need consistency to be trusted.
+
+Witness resolves this: The **workspace** (Git) holds your messy, contradictory, evolving thoughts. The **chain** holds the proven facts. You can be both human (conflicted, growing) and trustworthy (verifiable, anchored).
 
 **The Paradox of Mutable Identity:**
 - Agents must **evolve** — learn, update, consolidate memories
