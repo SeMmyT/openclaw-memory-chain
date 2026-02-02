@@ -1,15 +1,35 @@
 # Intelligent Model Routing System
 
 **Project:** WITNESS / OpenMemory
-**Status:** Proposal Draft
-**Date:** 2026-02-02
+**Status:** Simplified & Validated
+**Date:** 2026-02-02 (Updated)
 **Authors:** Klowalski 🐧 + SeMmy
 
 ---
 
 ## Executive Summary
 
-A brain-inspired intelligent routing system that automatically selects the optimal AI model for each task based on complexity, cost, and capability requirements. This enables the shift from "AI as tool" to "AI as personal assistant" by making always-on AI economically viable.
+A **simple, practical** routing system that optimizes AI costs without over-engineering. After discussion and feedback from GPT-4 and Gemini, we've moved from a complex analyzer-based approach to a straightforward pattern + context-aware system.
+
+**Key insight from review:** Context caching changes everything. A cached Sonnet turn (~$0.05) is cheaper than a fresh Haiku turn with full context reload. Stay sticky, don't switch models mid-session.
+
+---
+
+## TL;DR — The Simplified Approach
+
+After review, we're NOT building:
+- ❌ Analyzer model (Haiku) to score complexity
+- ❌ Dynamic mid-session model switching
+- ❌ Complex escalation triggers
+- ❌ Learning/optimization layer
+
+We ARE doing:
+- ✅ **Sonnet as sticky default** (context caching makes this cheaper than switching)
+- ✅ **Haiku for isolated crons** (memory tasks, background jobs — no context)
+- ✅ **Opus on explicit request** only
+- ✅ **Codex for implementation** (FREE via ChatGPT Plus)
+
+**Why simplify?** Context caching means a cached Sonnet turn (~$0.05) beats a fresh Haiku turn (~$0.10) after a model switch. Switching breaks the cache. Stay sticky.
 
 ---
 
@@ -407,91 +427,153 @@ complex-analysis:
 
 ---
 
-## Economic Analysis
+## Economic Analysis (Revised)
 
-### Current Cost (Single Model)
+### The Context Caching Factor
 
-| Strategy | Avg Cost/Turn | Daily (100 turns) | Monthly |
-|----------|---------------|-------------------|---------|
-| All Opus | $1.50 | $150 | $4,500 |
-| All Sonnet | $0.30 | $30 | $900 |
-| All Haiku | $0.03 | $3 | $90 |
+**Critical insight:** Anthropic's context caching changes the economics entirely.
 
-### With Intelligent Routing
+| Scenario | Input Cost/1M | With 90% Cache |
+|----------|---------------|----------------|
+| Sonnet (fresh) | $3.00 | - |
+| Sonnet (cached) | $3.00 | **$0.30** |
+| Haiku (fresh) | $0.25 | - |
+| Haiku (cached) | $0.25 | **$0.025** |
 
-Assumed distribution:
-- 60% Haiku (simple queries, heartbeats)
-- 30% Sonnet (general work)
-- 8% Opus (complex reasoning)
-- 2% Codex (code execution, free)
+**The key realization:** Switching models breaks the cache. A cached Sonnet turn (~$0.05) beats a fresh Haiku turn with context reload (~$0.10).
 
-| Tier | % | Cost/Turn | Weighted |
-|------|---|-----------|----------|
-| Haiku | 60% | $0.03 | $0.018 |
-| Sonnet | 30% | $0.30 | $0.090 |
-| Opus | 8% | $1.50 | $0.120 |
-| Codex | 2% | $0.00 | $0.000 |
-| **Total** | 100% | | **$0.228** |
+### Simplified Strategy Economics
 
-**Savings vs All-Sonnet: 24%**
-**Savings vs All-Opus: 85%**
+**Our actual approach:**
 
-### Break-Even Analysis
+| Use Case | Model | Context | Cost/Turn Est. |
+|----------|-------|---------|----------------|
+| Main session (ongoing) | Sonnet | Cached | ~$0.05 |
+| Heartbeat (isolated) | Haiku | Fresh, minimal | ~$0.01 |
+| Memory cron (isolated) | Haiku | Fresh | ~$0.03 |
+| Implementation | Codex | N/A | **$0.00** |
+| Complex (rare) | Opus | Cached | ~$0.50 |
 
-| Usage Level | All Opus | Intelligent | Savings |
-|-------------|----------|-------------|---------|
-| Light (50/day) | $2,250/mo | $342/mo | **$1,908** |
-| Medium (100/day) | $4,500/mo | $684/mo | **$3,816** |
-| Heavy (300/day) | $13,500/mo | $2,052/mo | **$11,448** |
+**Realistic daily distribution (100 turns):**
+- 80 turns: Sonnet (cached) = 80 × $0.05 = $4.00
+- 15 turns: Heartbeats/crons = 15 × $0.02 = $0.30
+- 3 turns: Opus = 3 × $0.50 = $1.50
+- 2 turns: Codex = FREE
+
+**Daily: ~$5.80 | Monthly: ~$175**
+
+### Comparison
+
+| Strategy | Monthly Cost |
+|----------|--------------|
+| All Opus | $4,500 |
+| All Sonnet (no caching) | $900 |
+| **Simplified routing** | **~$175** |
+| Theoretical optimal | ~$90 |
+
+**We get 96% of Opus-level capability at 4% of the cost.**
+
+### Why Not Micro-Optimize?
+
+We considered aggressive model switching (Haiku for simple queries, etc.) but:
+
+1. **Cache breaks cost more than savings** — Switching to Haiku saves $0.05 but reloading context later costs $0.10+
+2. **Complexity adds bugs** — Analyzer model, escalation logic = more failure modes
+3. **80/20 rule** — Simple sticky sessions capture most savings
+4. **Codex is FREE** — Biggest savings come from offloading implementation, not model switching
 
 ---
 
-## Implementation Plan
+## Implementation Plan (Simplified)
 
-### Phase 1: Pattern-Based Routing (MVP)
-**Timeline:** 1 week
+### ✅ Phase 1: Sticky Session Defaults (DONE)
+**Timeline:** Immediate
+**Effort:** Config change only
+
+```yaml
+# OpenClaw config
+agents:
+  defaults:
+    model:
+      primary: anthropic/claude-sonnet-4-5     # Main session
+      fallback: anthropic/claude-opus-4-5      # On explicit /opus
+      heartbeat: anthropic/claude-3-5-haiku-latest  # Heartbeats
+```
+
+**Rules:**
+- Main session stays on Sonnet (context caching benefit)
+- Heartbeats use Haiku (isolated, no context)
+- Opus only on explicit `/opus` or `/reasoning` command
+- Codex for implementation work (see below)
+
+### ✅ Phase 2: Codex Integration (DONE)
+**Timeline:** Same day
+**Effort:** One-time auth setup
+
+**Setup completed:**
+- Codex CLI v0.93.0 installed
+- Auth persists in `~/.codex/auth.json`
+- Model: `gpt-5.2-codex` (FREE via Plus)
+- No dedicated workspace needed
+
+**Workflow:**
+```bash
+# From any git repo
+cd ~/project && codex --full-auto "implement feature X"
+
+# Or via Klowalski (PTY required)
+exec(command="cd ~/repo && codex --full-auto 'task'", pty=true)
+```
+
+**Division of labor:**
+| Task | Model |
+|------|-------|
+| Planning, architecture, review | Klowalski (Sonnet/Opus) |
+| Implementation, boilerplate, tests | Codex (FREE) |
+| Debugging, coordination | Klowalski (Sonnet) |
+
+### Phase 3: Isolated Crons for Memory (TODO)
+**Timeline:** When auto-memory lands
 **Effort:** Low
 
-- Simple pattern matching for task type detection
-- No analyzer model (rule-based)
-- Manual tier assignment based on patterns
-- No escalation
+Memory maintenance runs in isolated sessions with Haiku:
+
+```yaml
+crons:
+  memory-consolidation:
+    schedule: { kind: cron, expr: "0 4 * * *" }
+    sessionTarget: isolated
+    payload:
+      kind: agentTurn
+      model: anthropic/claude-3-5-haiku-latest
+      message: "Consolidate yesterday's memories..."
+```
+
+**Why isolated?** No context to cache. Fresh Haiku is cheapest.
+
+### Phase 4: MAYBE Later — Pattern Overrides
+**Timeline:** If needed
+**Effort:** Low
+
+Only if we see clear patterns worth automating:
 
 ```typescript
-function routeByPattern(message: string): Model {
-  if (/what time|weather|status/i.test(message)) return 'haiku';
-  if (/think hard|architecture|design/i.test(message)) return 'opus';
-  if (/```|code|implement/i.test(message)) return 'codex';
-  return 'sonnet';  // default
+// Simple, optional overrides
+function maybeOverride(message: string): Model | null {
+  if (/use opus|think hard/i.test(message)) return 'opus';
+  if (/\/haiku/i.test(message)) return 'haiku';
+  return null; // stick with session default
 }
 ```
 
-### Phase 2: Intelligent Analysis
-**Timeline:** 2-3 weeks
-**Effort:** Medium
+### ~~Phase X: Complex Analyzer~~ (CANCELLED)
+We're NOT building:
+- Complexity scoring
+- Analyzer model
+- Dynamic escalation
+- Learning layer
 
-- Add analyzer model (Haiku) for complex cases
-- Complexity scoring algorithm
-- Task type classification
-- Confidence scoring
-
-### Phase 3: Escalation Support
-**Timeline:** 1-2 weeks
-**Effort:** Medium
-
-- Mid-task escalation triggers
-- Automatic retry with upgraded model
-- User notification of escalations
-- Escalation history tracking
-
-### Phase 4: Learning & Optimization
-**Timeline:** Ongoing
-**Effort:** High
-
-- Track routing decisions and outcomes
-- Learn which tasks actually need Opus
-- Adjust thresholds based on real data
-- User feedback integration
+**Reason:** Over-engineering. Context caching makes simple sticky sessions optimal.
 
 ---
 
@@ -557,17 +639,68 @@ witness-protocol/
 
 ---
 
-## Open Questions for Review
+## Open Questions (Resolved)
 
-1. **Analyzer overhead**: Is it worth using Haiku to analyze tasks, or should we rely on patterns only?
+1. **Analyzer overhead**: ~~Is it worth using Haiku to analyze tasks?~~ 
+   → **No.** Pattern matching sufficient. Analyzer adds latency without proportional benefit.
 
-2. **Cross-provider routing**: How do we handle routing between Anthropic, OpenAI, and local models with different capabilities?
+2. **Cross-provider routing**: ~~How do we handle routing between providers?~~
+   → **Stay in Anthropic family** for main session (prompt dialect consistency). Codex (OpenAI) is fine for isolated coding tasks.
 
-3. **Escalation UX**: Should users be notified when escalation happens? How?
+3. **Escalation UX**: ~~Should users be notified when escalation happens?~~
+   → **N/A.** No auto-escalation. User explicitly requests Opus when needed.
 
-4. **Learning from mistakes**: How do we track when routing was suboptimal and adjust?
+4. **Learning from mistakes**: ~~How do we track suboptimal routing?~~
+   → **Deferred.** Simple approach first. Track manually if issues arise.
 
-5. **Integration depth**: Should this be an OpenClaw core feature or a skill/plugin?
+5. **Integration depth**: ~~Core feature or plugin?~~
+   → **Config-level.** Just model settings in OpenClaw config. No special integration needed.
+
+---
+
+## Codex Integration Details
+
+### Setup (Completed 2026-02-02)
+
+```bash
+# Install (done)
+npm install -g @openai/codex
+
+# Auth (done via device code flow)
+# Stored in: ~/.codex/auth.json
+# Model: gpt-5.2-codex (included with ChatGPT Plus)
+```
+
+### Usage Patterns
+
+**One-shot (preferred for automation):**
+```bash
+cd ~/project && codex --full-auto "implement feature X"
+```
+
+**Interactive (for exploration):**
+```bash
+cd ~/project && codex
+```
+
+**From Klowalski (requires PTY):**
+```bash
+exec(command="cd ~/repo && codex --full-auto 'task'", pty=true, background=true)
+```
+
+### Workflow
+
+1. **Klowalski plans** — Architecture, design, specs
+2. **Klowalski creates task** — Clear, specific prompt
+3. **Codex implements** — Code generation, tests, boilerplate
+4. **Klowalski reviews** — Quality check, integration
+5. **Commit** — Standard git workflow
+
+### Cost Impact
+
+- Codex is **FREE** with ChatGPT Plus ($20/mo)
+- Offloads ~30-50% of coding work from Claude
+- Biggest single cost reduction in the system
 
 ---
 
@@ -583,14 +716,38 @@ witness-protocol/
 
 ---
 
+## Decisions Made (2026-02-02)
+
+After review with GPT-4 and Gemini Flash, the following decisions were made:
+
+### ✅ Accepted
+1. **Sonnet as default** — Context caching makes this optimal
+2. **Haiku for isolated sessions only** — Crons, memory tasks
+3. **Opus on explicit request** — No auto-escalation
+4. **Codex for implementation** — FREE via Plus subscription
+
+### ❌ Rejected
+1. **Analyzer model** — Adds latency, cost, complexity for marginal benefit
+2. **Complexity scoring** — Over-engineered; patterns sufficient
+3. **Dynamic escalation** — Breaking cache costs more than potential savings
+4. **Learning layer** — Premature optimization
+
+### 🔄 Deferred
+1. **Pattern overrides** — Maybe later if clear needs emerge
+2. **Cross-provider routing** — Staying in Anthropic family for now (prompt dialect consistency)
+3. **User-facing routing UI** — Not needed for single-user setup
+
+---
+
 ## Next Steps
 
-1. [ ] Review this proposal with GPT/Gemini/Claude
-2. [ ] Finalize spec and get consensus
-3. [ ] Restructure repository
-4. [ ] Implement Phase 1 (pattern-based MVP)
-5. [ ] Test with real workloads
-6. [ ] Iterate based on feedback
+1. [x] Review this proposal with GPT/Gemini ✓
+2. [x] Simplify based on feedback ✓
+3. [x] Update spec with decisions ✓
+4. [x] Set up Codex CLI ✓
+5. [ ] Configure OpenClaw with simplified routing
+6. [ ] Test Codex workflow on real tasks
+7. [ ] Implement auto-memory crons (when ready)
 
 ---
 
