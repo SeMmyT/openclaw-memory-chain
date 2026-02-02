@@ -1,464 +1,450 @@
-# Self-Editing Memory System
+# Witness Memory System
 
-**Project:** WITNESS / Memory Chain
-**Status:** Spec Draft
+**Project:** WITNESS Protocol
+**Status:** Spec Draft (Revised)
 **Date:** 2026-02-02
 **Authors:** Klowalski + SeMmy
-**Inspiration:** Letta (MemGPT)
+**Inspiration:** Letta (MemGPT), Human Neuroscience, OpenClaw Heartbeat
 
 ---
 
 ## Executive Summary
 
-This spec integrates Letta's best practices into Witness Memory Chain while preserving cryptographic integrity. The core insight: **agents should actively manage their own memory**, not just passively accumulate it.
+Witness provides **verifiable, brain-inspired memory** for AI agents via the **Model Context Protocol (MCP)**. Any agent framework can use Witness as their memory backend and gain:
 
-Key features:
-1. **Self-editing memory tools** - Agents commit, recall, and consolidate memories
-2. **Memory blocks** - Structured containers (persona, user_profile, goals, knowledge)
-3. **Consolidation entries** - Update understanding without breaking the chain
-4. **Core vs working memory** - Always-injected vs retrieved-on-demand
+1. **Cryptographic integrity** - Tamper-proof, signed, hash-linked memories
+2. **Brain-inspired storage** - Provenance tracking, consolidation, decay
+3. **Framework-agnostic interface** - MCP standard (adopted by OpenAI, Google, Microsoft, Anthropic)
+4. **On-chain anchoring** - Bitcoin timestamps, Base blockchain proofs
 
----
-
-## The Problem
-
-### Current State: Passive Memory Accumulation
-
-```
-Session ends → Hook saves summary → Memory grows → Retrieval degrades
-```
-
-Problems:
-- **Uncontrolled growth** - Everything saved, nothing curated
-- **Stale context** - Old understanding never updated
-- **No structure** - Flat list of memories, no semantic organization
-- **Agent passivity** - Agent doesn't decide what's worth remembering
-
-### Letta's Insight: Agents as Memory Curators
-
-Letta (formerly MemGPT) solved this by giving agents explicit memory management tools:
-- `core_memory_append` / `core_memory_replace`
-- `archival_memory_insert` / `archival_memory_search`
-
-The agent decides what to remember, what to update, and what to consolidate.
+**Core insight:** Memory systems store what agents remember. Witness **proves** what they knew and when.
 
 ---
 
-## Solution: Self-Editing Memory for Witness Chain
-
-### Design Principles
-
-1. **Agent autonomy** - Agent decides what's important
-2. **Chain integrity** - Never modify history; append consolidations
-3. **Structured blocks** - Semantic organization for core context
-4. **Token efficiency** - Core memories always injected; working memories retrieved
-
-### Memory Hierarchy
+## The Three Functions of an Agent
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      CORE MEMORY                             │
-│  Always injected into context. Agent's persistent identity.  │
-│                                                               │
-│  ┌──────────┐  ┌──────────────┐  ┌───────┐  ┌───────────┐   │
-│  │ Persona  │  │ User Profile │  │ Goals │  │ Knowledge │   │
-│  └──────────┘  └──────────────┘  └───────┘  └───────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    WORKING MEMORY                            │
-│  Retrieved on-demand based on query relevance.               │
-│                                                               │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        │
-│  │ Memory  │  │ Memory  │  │ Memory  │  │ Memory  │  ...    │
-│  │ (active)│  │ (active)│  │(supersd)│  │ (active)│        │
-│  └─────────┘  └─────────┘  └─────────┘  └─────────┘        │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           AGENT RUNTIME                                  │
+│                                                                          │
+│   ┌───────────────┐   ┌───────────────┐   ┌───────────────┐            │
+│   │   REASONING   │   │  REMEMBERING  │   │   PROACTION   │            │
+│   │               │   │               │   │  (Heartbeat)  │            │
+│   │  LLM thinking │   │ Memory system │   │               │            │
+│   │  Tool calling │   │ Context mgmt  │   │ Cron jobs     │            │
+│   │  Planning     │   │ Learning      │   │ Background    │            │
+│   │               │   │               │   │ Self-check    │            │
+│   └───────┬───────┘   └───────┬───────┘   └───────┬───────┘            │
+│           │                   │                   │                     │
+│           └───────────────────┼───────────────────┘                     │
+│                               │                                          │
+│                               ▼                                          │
+│                    ┌─────────────────────┐                              │
+│                    │   WITNESS MEMORY    │                              │
+│                    │   (MCP Server)      │                              │
+│                    │                     │                              │
+│                    │   - Integrity layer │                              │
+│                    │   - Brain storage   │                              │
+│                    │   - Proof system    │                              │
+│                    └─────────────────────┘                              │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+| Function | Purpose | Witness Role |
+|----------|---------|--------------|
+| **Reasoning** | Think, plan, decide | Stores decisions with provenance |
+| **Remembering** | Learn, recall, update | Core memory infrastructure |
+| **Proaction** | Background tasks, self-maintenance | Consolidation, decay, anchoring |
+
+---
+
+## Why MCP?
+
+### Industry Standard (2025-2026)
+
+MCP is now the de-facto protocol for AI tool integration:
+
+- **Anthropic** - Created MCP, donated to Linux Foundation
+- **OpenAI** - Adopted across ChatGPT, Agents SDK
+- **Google** - Gemini MCP support
+- **Microsoft** - Windows 11, Copilot, VS Code integration
+- **10,000+ public MCP servers** / **97M+ monthly SDK downloads**
+
+### Transport Options
+
+| Transport | Hosting | Use Case |
+|-----------|---------|----------|
+| **STDIO** | No - local subprocess | Claude Desktop, Cursor, local dev |
+| **Streamable HTTP** | Yes - HTTP server | Remote agents, Telegram bots, shared |
+
+Witness supports both. Local agents spawn our process; remote agents call our HTTP endpoint.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     ANY MCP-COMPATIBLE CLIENT                            │
+│                                                                          │
+│  Claude │ ChatGPT │ Gemini │ Cursor │ Letta │ Convex │ Custom Agents    │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │ MCP Protocol
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        WITNESS MCP SERVER                                │
+│                                                                          │
+│  Tools:                                                                  │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐   │
+│  │memory_commit │ │memory_recall │ │memory_rethink│ │ block_update │   │
+│  └──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘   │
+│                                                                          │
+│  Transport: STDIO (local) │ HTTP (remote)                               │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     BRAIN-INSPIRED STORAGE                               │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  PROVENANCE TRACKING                                             │   │
+│  │                                                                   │   │
+│  │  source: "auto" | "manual" | "consolidation" | "heartbeat"      │   │
+│  │  trigger: "user_said" | "decision_made" | "pattern_detected"    │   │
+│  │  importance: 0.0 - 1.0                                          │   │
+│  │  emotion_tag: "significant" | "routine" | null                  │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  MEMORY LIFECYCLE                                                │   │
+│  │                                                                   │
+│  │  ┌────────┐    ┌────────┐    ┌────────┐    ┌────────────────┐   │   │
+│  │  │  HOT   │───▶│  WARM  │───▶│  COLD  │───▶│ ARCHIVED/SUPER │   │   │
+│  │  │ 0-7d   │    │ 8-30d  │    │ 30d+   │    │   (in chain)   │   │   │
+│  │  └────────┘    └────────┘    └────────┘    └────────────────┘   │   │
+│  │       ▲                                                          │   │
+│  │       └──────── access reheats ──────────────────────────────────│   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  CONSOLIDATION (Brain's "Sleep")                                 │   │
+│  │                                                                   │
+│  │  Multiple memories ──▶ Synthesized understanding                 │   │
+│  │  Original entries: marked superseded (not deleted)               │   │
+│  │  New entry: references originals via supersedes[]                │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      WITNESS INTEGRITY LAYER                             │
+│                                                                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────────┐  │
+│  │ chain.jsonl  │  │  content/    │  │        memory.db             │  │
+│  │              │  │              │  │                              │  │
+│  │ Append-only  │  │ Content-     │  │ SQLite index                 │  │
+│  │ Hash-linked  │  │ addressable  │  │ FTS5 search                  │  │
+│  │ Ed25519 sig  │  │ SHA-256 keys │  │ Mutable (rebuildable)        │  │
+│  └──────────────┘  └──────────────┘  └──────────────────────────────┘  │
+│                                                                          │
+│  Verification: memory-chain verify                                       │
+│  Export: memory-chain export --format json|markdown                     │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       ON-CHAIN ANCHORING                                 │
+│                                                                          │
+│  ┌──────────────────────┐    ┌──────────────────────────────────────┐  │
+│  │   OpenTimestamps     │    │        WITNESS Protocol              │  │
+│  │                      │    │                                      │  │
+│  │   Bitcoin timestamps │    │   Base blockchain anchors            │  │
+│  │   Free, slow (~hrs)  │    │   $WITNESS token fee                 │  │
+│  │   Maximum trust      │    │   Fast, on-demand                    │  │
+│  └──────────────────────┘    └──────────────────────────────────────┘  │
+│                                                                          │
+│  Proof: "This agent had these memories at this specific time"           │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Technical Design
+## MCP Tool Definitions
 
-### Phase 1: Type Definitions
+### memory_commit
 
-**File:** `src/types.ts`
+Commit important information to long-term memory.
 
 ```typescript
-// Extend EntryType
-export type EntryType = 'memory' | 'identity' | 'decision' | 'redaction' | 'consolidation' | 'block';
-
-// Block labels for structured memory
-export type BlockLabel = 'persona' | 'user_profile' | 'goals' | 'knowledge';
-
-// Metadata for consolidation entries
-export interface ConsolidationMetadata {
-  supersedes: number[];  // Sequence numbers being consolidated
-  reason?: string;       // Why this consolidation happened
-}
-
-// Metadata for block entries
-export interface BlockMetadata {
-  block_label: BlockLabel;
-  version?: number;           // Auto-incremented
-  previous_block_seq?: number; // Links to previous version
-}
-
-// Extended Memory interface
-export interface Memory {
-  // ... existing fields ...
-  is_superseded?: boolean;      // True if consolidated into another memory
-  superseded_by?: number | null; // Seq of consolidation entry
-  block_label?: BlockLabel | null;
-  is_core?: boolean;            // Always injected if true
-}
-
-// Extended retrieval options
-export interface RetrievalOptions {
-  // ... existing fields ...
-  includeSuperseded?: boolean;  // Include superseded memories (default: false)
+{
+  name: "memory_commit",
+  description: "Store something worth remembering. Use when you learn important facts, user preferences, decisions, or significant events.",
+  parameters: {
+    content: string,           // What to remember
+    source?: "manual" | "auto" | "heartbeat",  // Why this memory exists
+    trigger?: string,          // What caused this memory ("user_said", "decided", etc.)
+    importance?: number,       // 0.0-1.0 significance score
+    tier?: "committed" | "relationship" | "ephemeral",
+    relatedEntities?: string[] // Knowledge graph connections
+  }
 }
 ```
 
-### Phase 2: Schema Migration
+### memory_recall
 
-**File:** `src/index/sqlite.ts`
+Retrieve relevant memories for context.
+
+```typescript
+{
+  name: "memory_recall",
+  description: "Search memories for relevant context. Use before tasks that benefit from background information.",
+  parameters: {
+    query: string,             // What to search for
+    maxTokens?: number,        // Token budget
+    maxResults?: number,       // Max memories to return
+    includeSuperseded?: boolean, // Include consolidated memories (default: false)
+    tiers?: string[]           // Filter by tier
+  }
+}
+```
+
+### memory_rethink
+
+Consolidate multiple memories into clearer understanding.
+
+```typescript
+{
+  name: "memory_rethink",
+  description: "Synthesize fragmented or outdated memories into a unified understanding. Like the brain's memory consolidation during sleep.",
+  parameters: {
+    supersedes: number[],      // Sequence numbers to consolidate
+    newUnderstanding: string,  // The synthesized memory
+    reason?: string            // Why this consolidation
+  }
+}
+```
+
+### block_update
+
+Update structured memory blocks (core context).
+
+```typescript
+{
+  name: "block_update",
+  description: "Update a persistent memory block. Blocks are always injected into context.",
+  parameters: {
+    label: "persona" | "user_profile" | "goals" | "knowledge",
+    content: string,
+    isCore?: boolean           // Always inject (default: true for blocks)
+  }
+}
+```
+
+### memory_introspect
+
+Understand why a memory exists (provenance).
+
+```typescript
+{
+  name: "memory_introspect",
+  description: "Get the full history and provenance of a memory. Understand why it exists and what triggered it.",
+  parameters: {
+    seq: number                // Memory sequence number
+  },
+  returns: {
+    memory: Memory,
+    source: string,            // How it was created
+    trigger: string,           // What caused it
+    supersededBy?: number,     // If consolidated
+    supersedes?: number[],     // What it consolidated
+    anchorProof?: AnchorProof  // On-chain proof if anchored
+  }
+}
+```
+
+---
+
+## Brain-Inspired Storage Schema
+
+### Memory Entry (Extended)
+
+```typescript
+interface Memory {
+  // Core fields
+  seq: number;
+  content: string;
+  type: EntryType;
+  tier: Tier;
+  created_at: string;
+
+  // Brain-inspired provenance
+  source: "manual" | "auto" | "consolidation" | "heartbeat";
+  trigger?: string;           // "user_said", "decided", "pattern_detected"
+  importance: number;         // 0.0 - 1.0
+  emotion_tag?: string;       // Amygdala-like significance marker
+
+  // Lifecycle tracking
+  access_count: number;
+  last_accessed: string | null;
+  decay_tier: "hot" | "warm" | "cold";
+
+  // Consolidation
+  is_superseded: boolean;
+  superseded_by?: number;
+  supersedes?: number[];      // For consolidation entries
+
+  // Knowledge graph
+  related_entities?: string[];
+  block_label?: BlockLabel;
+  is_core: boolean;
+}
+```
+
+### SQLite Schema Additions
 
 ```sql
--- New columns on memories table
+-- Provenance tracking
+ALTER TABLE memories ADD COLUMN source TEXT DEFAULT 'manual';
+ALTER TABLE memories ADD COLUMN trigger TEXT;
+ALTER TABLE memories ADD COLUMN emotion_tag TEXT;
+
+-- Lifecycle
+ALTER TABLE memories ADD COLUMN decay_tier TEXT DEFAULT 'hot';
+
+-- Consolidation
 ALTER TABLE memories ADD COLUMN is_superseded INTEGER DEFAULT 0;
 ALTER TABLE memories ADD COLUMN superseded_by INTEGER;
+
+-- Knowledge graph
+ALTER TABLE memories ADD COLUMN related_entities TEXT; -- JSON array
 ALTER TABLE memories ADD COLUMN block_label TEXT;
 ALTER TABLE memories ADD COLUMN is_core INTEGER DEFAULT 0;
 
--- Track consolidation relationships
-CREATE TABLE IF NOT EXISTS consolidations (
-  consolidation_seq INTEGER NOT NULL,
-  superseded_seq INTEGER NOT NULL,
-  PRIMARY KEY (consolidation_seq, superseded_seq)
-);
-
--- Efficient lookups
-CREATE INDEX IF NOT EXISTS idx_memories_core ON memories(is_core) WHERE is_core = 1;
-CREATE INDEX IF NOT EXISTS idx_memories_block ON memories(block_label) WHERE block_label IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(is_superseded) WHERE is_superseded = 0;
-```
-
-New functions:
-- `markSuperseded(db, seq, consolidationSeq)` - Mark memory as superseded
-- `insertConsolidation(db, consolidationSeq, supersededSeq)` - Record relationship
-- `getLatestBlock(db, label)` - Get current block by label
-- `getCoreMemories(db)` - Get all core memories
-
-### Phase 3: Agent Tools API
-
-**New file:** `src/tools/index.ts`
-
-```typescript
-export class AgentMemoryTools {
-  constructor(private dataDir: string, private dbPath: string) {}
-
-  /**
-   * Agent commits something worth remembering.
-   * Use when encountering important facts, user preferences, or decisions.
-   */
-  async memoryCommit(input: {
-    content: string;
-    tier?: Tier;
-    importance?: number;
-  }): Promise<{ seq: number; contentHash: string }>;
-
-  /**
-   * Agent retrieves relevant context.
-   * Use when needing background information for a task.
-   */
-  async memoryRecall(input: {
-    query: string;
-    maxTokens?: number;
-    maxResults?: number;
-  }): Promise<{ memories: ScoredMemory[]; tokensUsed: number }>;
-
-  /**
-   * Agent consolidates/updates understanding.
-   * Use when multiple memories can be synthesized into a clearer understanding.
-   */
-  async memoryRethink(input: {
-    supersedes: number[];
-    newUnderstanding: string;
-    reason?: string;
-  }): Promise<{ consolidationSeq: number; supersededCount: number }>;
-
-  /**
-   * Get a memory block by label.
-   */
-  async blockGet(label: BlockLabel): Promise<Memory | null>;
-
-  /**
-   * Update a memory block.
-   * Creates a new version, superseding the previous one.
-   */
-  async blockUpdate(input: {
-    label: BlockLabel;
-    content: string;
-    isCore?: boolean;
-  }): Promise<{ seq: number; version: number }>;
-
-  /**
-   * Get all core memories (always injected into context).
-   */
-  async getCoreMemories(): Promise<Memory[]>;
-}
-```
-
-### Phase 4: Tool Definitions for AI Frameworks
-
-**New file:** `src/tools/definitions.ts`
-
-```typescript
-export const MEMORY_TOOLS = {
-  memory_commit: {
-    name: "memory_commit",
-    description: "Commit important information to long-term memory. Use when you learn something worth remembering about the user, a decision, or important context.",
-    parameters: {
-      type: "object",
-      properties: {
-        content: { type: "string", description: "What to remember" },
-        importance: { type: "number", description: "1-10 importance score" }
-      },
-      required: ["content"]
-    }
-  },
-  memory_recall: {
-    name: "memory_recall",
-    description: "Retrieve relevant memories for a topic. Use before tasks that might benefit from background context.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "What to search for" },
-        maxResults: { type: "number", description: "Maximum memories to return" }
-      },
-      required: ["query"]
-    }
-  },
-  memory_rethink: {
-    name: "memory_rethink",
-    description: "Consolidate multiple memories into a clearer understanding. Use when you have fragmented or outdated memories that should be unified.",
-    parameters: {
-      type: "object",
-      properties: {
-        supersedes: { type: "array", items: { type: "number" }, description: "Sequence numbers to consolidate" },
-        newUnderstanding: { type: "string", description: "The consolidated understanding" },
-        reason: { type: "string", description: "Why consolidating" }
-      },
-      required: ["supersedes", "newUnderstanding"]
-    }
-  },
-  block_update: {
-    name: "block_update",
-    description: "Update a structured memory block (persona, user_profile, goals, knowledge). Use to maintain persistent context about yourself or the user.",
-    parameters: {
-      type: "object",
-      properties: {
-        label: { type: "string", enum: ["persona", "user_profile", "goals", "knowledge"] },
-        content: { type: "string", description: "New block content" },
-        isCore: { type: "boolean", description: "Always inject into context" }
-      },
-      required: ["label", "content"]
-    }
-  }
-};
-```
-
-### Phase 5: Retrieval Updates
-
-**File:** `src/index/retrieval.ts`
-
-Update `retrieveMemories()` to:
-- Filter out superseded memories by default
-- Add `includeSuperseded` option for historical queries
-
-```typescript
-export function retrieveMemories(
-  db: Database.Database,
-  query: string,
-  options: RetrievalOptions = {}
-): ScoredMemory[] {
-  const { includeSuperseded = false, ...rest } = options;
-
-  // Add WHERE clause: is_superseded = 0 unless includeSuperseded
-  // ... rest of implementation
-}
-
-export function getCoreMemories(db: Database.Database): Memory[] {
-  return db.prepare(`
-    SELECT * FROM memories
-    WHERE is_core = 1 AND is_superseded = 0
-    ORDER BY block_label, seq DESC
-  `).all();
-}
-
-export function getLatestBlock(db: Database.Database, label: BlockLabel): Memory | null {
-  return db.prepare(`
-    SELECT * FROM memories
-    WHERE block_label = ? AND is_superseded = 0
-    ORDER BY seq DESC LIMIT 1
-  `).get(label) || null;
-}
-```
-
-### Phase 6: Bootstrap Enhancement
-
-**File:** `skill/hooks/agent-bootstrap.ts`
-
-```typescript
-export async function bootstrap(context: BootstrapContext): Promise<BootstrapResult> {
-  // ... existing setup ...
-
-  // 1. Get core memories (always injected, ~500 tokens reserved)
-  const coreMemories = getCoreMemories(db);
-  const coreBlock = formatCoreMemories(coreMemories);
-
-  // 2. Get working memories (query-based retrieval)
-  const workingBudget = maxTokens - estimateTokens(coreBlock);
-  const workingMemories = context.userMessage
-    ? retrieveMemories(db, context.userMessage, { maxTokens: workingBudget })
-    : retrieveContext(db, { maxTokens: workingBudget });
-
-  // 3. Format with distinct sections
-  const memoryBlock = [coreBlock, formatMemoriesForPrompt(workingMemories)]
-    .filter(Boolean)
-    .join('\n\n');
-
-  return { systemPrompt: memoryBlock, ... };
-}
-
-function formatCoreMemories(memories: Memory[]): string {
-  const blocks: Record<BlockLabel, string[]> = {
-    persona: [],
-    user_profile: [],
-    goals: [],
-    knowledge: []
-  };
-
-  for (const m of memories) {
-    if (m.block_label) blocks[m.block_label].push(m.content);
-  }
-
-  const sections = [
-    blocks.persona.length && `## Who I Am\n${blocks.persona.join('\n')}`,
-    blocks.user_profile.length && `## About the User\n${blocks.user_profile.join('\n')}`,
-    blocks.goals.length && `## Current Goals\n${blocks.goals.join('\n')}`,
-    blocks.knowledge.length && `## Key Knowledge\n${blocks.knowledge.join('\n')}`
-  ].filter(Boolean);
-
-  return sections.join('\n\n');
-}
+-- Indexes for efficient queries
+CREATE INDEX idx_memories_decay ON memories(decay_tier);
+CREATE INDEX idx_memories_source ON memories(source);
+CREATE INDEX idx_memories_core ON memories(is_core) WHERE is_core = 1;
+CREATE INDEX idx_memories_active ON memories(is_superseded) WHERE is_superseded = 0;
 ```
 
 ---
 
-## Chain Integrity
+## Heartbeat Integration (Proaction)
 
-### How Consolidation Preserves History
+The heartbeat system uses Witness for background memory management:
 
+```yaml
+# Hourly checkpoint (Haiku - cheap)
+name: witness-checkpoint
+schedule:
+  kind: every
+  everyMs: 3600000
+payload:
+  kind: agentTurn
+  model: anthropic/claude-3-5-haiku-latest
+  message: |
+    Memory checkpoint:
+    1. Call memory_recall for recent significant events
+    2. Identify patterns worth consolidating
+    3. Call memory_rethink if consolidation needed
+    4. Update decay_tier based on access patterns
+
+# Weekly consolidation (Sonnet - smarter)
+name: witness-consolidation
+schedule:
+  kind: cron
+  expr: "0 10 * * 0"  # Sunday 10:00 UTC
+payload:
+  kind: agentTurn
+  model: anthropic/claude-sonnet-4-5
+  message: |
+    Weekly memory consolidation (brain's "sleep"):
+    1. Review all warm/cold memories
+    2. Identify clusters that should be unified
+    3. Call memory_rethink for each cluster
+    4. Archive cold memories (remove from active index, preserve chain)
+    5. Anchor chain if significant changes
 ```
-# Original memories (still in chain, marked superseded)
-seq=5: "User prefers dark mode"
-seq=8: "User mentioned they use VS Code"
-seq=12: "User is a TypeScript developer"
-
-# Consolidation entry (new entry, references originals)
-seq=15: {
-  type: "consolidation",
-  content: "User is a TypeScript developer who prefers dark mode and uses VS Code",
-  metadata: {
-    supersedes: [5, 8, 12],
-    reason: "Unified user profile information"
-  }
-}
-```
-
-The chain remains append-only. Original entries are never modified. The index tracks supersession for efficient retrieval.
-
-### Verification Still Works
-
-```bash
-memory-chain verify  # Still validates entire chain
-```
-
-Consolidation entries are valid chain entries with proper signatures and hash-links.
 
 ---
 
-## File Changes Summary
+## Comparison: What Witness Adds
 
-### New Files
+| Feature | Letta | Convex | LangChain | **Witness** |
+|---------|-------|--------|-----------|-------------|
+| Memory storage | ✅ | ✅ | ✅ | ✅ |
+| Semantic search | ✅ | ✅ | ✅ | ✅ |
+| Agent tools | ✅ | ✅ | ✅ | ✅ (MCP) |
+| Provenance tracking | ❌ | ❌ | ❌ | ✅ |
+| Tamper-proof chain | ❌ | ❌ | ❌ | ✅ |
+| Signed entries | ❌ | ❌ | ❌ | ✅ |
+| Bitcoin timestamps | ❌ | ❌ | ❌ | ✅ |
+| On-chain anchoring | ❌ | ❌ | ❌ | ✅ |
+| Verifiable audit | ❌ | ❌ | ❌ | ✅ |
+| Framework-agnostic | ❌ | ❌ | ❌ | ✅ (MCP) |
+
+**Witness unique value:** Memory with receipts. Prove what the agent knew and when.
+
+---
+
+## Implementation Phases
+
+### Phase 1: MCP Server Foundation
+- [ ] `src/mcp/server.ts` - MCP server with STDIO transport
+- [ ] `src/mcp/tools.ts` - Tool handlers wrapping existing chain operations
+- [ ] `src/mcp/http.ts` - HTTP transport for remote access
+- [ ] CLI: `memory-chain mcp-server --transport stdio|http`
+
+### Phase 2: Brain-Inspired Storage
+- [ ] Schema migration for provenance fields
+- [ ] Decay tier calculation in retrieval
+- [ ] Consolidation entry type and handling
+- [ ] `memory_introspect` tool for provenance queries
+
+### Phase 3: Heartbeat Integration
+- [ ] Cron job templates for checkpoint/consolidation
+- [ ] Auto-decay based on access patterns
+- [ ] Chain anchoring triggers
+
+### Phase 4: Documentation & Discovery
+- [ ] Agent47 skill for capability discovery
+- [ ] Integration guides for Letta, Convex, LangChain
+- [ ] Example agents using Witness MCP
+
+---
+
+## Files to Create
 
 | File | Purpose |
 |------|---------|
-| `src/tools/index.ts` | AgentMemoryTools class |
-| `src/tools/definitions.ts` | AI framework tool definitions |
-| `skill/commands/memory-tools.ts` | Skill command handlers |
-| `test/tools.test.ts` | Agent tools tests |
-| `test/consolidation.test.ts` | Consolidation tests |
-| `test/blocks.test.ts` | Memory blocks tests |
+| `src/mcp/server.ts` | MCP server implementation |
+| `src/mcp/tools.ts` | Tool handlers |
+| `src/mcp/http.ts` | HTTP transport |
+| `skill/witness-discovery.md` | Agent47 capability skill |
+| `docs/INTEGRATION.md` | Framework integration guide |
 
-### Modified Files
+## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/types.ts` | New types (EntryType, BlockLabel, etc.) |
-| `src/index/sqlite.ts` | Schema migration, new functions |
-| `src/index/retrieval.ts` | Supersession filtering, getCoreMemories |
-| `src/index.ts` | Export new tools and types |
-| `skill/hooks/agent-bootstrap.ts` | Core memory injection |
-
----
-
-## Migration Strategy
-
-1. **Backward compatible** - New columns have defaults; old chains work unchanged
-2. **Schema auto-migration** - `initIndex()` adds columns if missing (idempotent ALTERs)
-3. **Rebuild handles new types** - `rebuildFromChain()` processes consolidation/block entries
-
----
-
-## Verification Checklist
-
-- [ ] Existing tests pass: `pnpm test:run`
-- [ ] Schema migration works with existing chain
-- [ ] Consolidation flow:
-  - Add 3 memories
-  - Consolidate into 1
-  - Verify originals marked superseded
-  - Verify consolidated memory returned in retrieval
-  - Verify originals excluded from default retrieval
-- [ ] Block flow:
-  - Set persona block
-  - Verify injected in bootstrap
-  - Update block
-  - Verify version increments
-  - Verify old version superseded
-- [ ] Retrieval:
-  - Superseded memories excluded by default
-  - `includeSuperseded: true` includes them
-
----
-
-## Implementation Order
-
-1. **Types (Phase 1)** - Foundation for everything else
-2. **Schema (Phase 2)** - Database must support new data
-3. **Retrieval updates (Phase 4)** - Needed by tools
-4. **Agent tools (Phase 3)** - Core feature
-5. **Bootstrap enhancement (Phase 5)** - Use new retrieval
-6. **Skill commands (Phase 6)** - Expose to agents
+| `src/types.ts` | Provenance fields, decay tier |
+| `src/index/sqlite.ts` | Schema migration |
+| `src/index/retrieval.ts` | Decay-aware retrieval |
+| `src/cli.ts` | `mcp-server` command |
+| `package.json` | MCP SDK dependency |
 
 ---
 
 ## References
 
-- [Letta (MemGPT) Documentation](https://docs.letta.com/)
+- [Model Context Protocol](https://modelcontextprotocol.io/)
+- [MCP Specification 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25)
+- [Letta (MemGPT)](https://docs.letta.com/)
 - [MemGPT Paper](https://arxiv.org/abs/2310.08560)
-- Witness Protocol spec: `specs/WITNESS-PROTOCOL.md`
+- [Human Memory Consolidation](https://en.wikipedia.org/wiki/Memory_consolidation)
+- Witness Protocol: `specs/WITNESS-PROTOCOL.md`
+- Auto-Memory Plan: `PLAN-AUTO-MEMORY.md`
